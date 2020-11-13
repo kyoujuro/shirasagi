@@ -10,7 +10,6 @@ module History::Model::Data
     index({ ref_coll: 1, "data._id" => 1, created: -1 })
 
     cattr_reader(:max_age) { SS.config.ss.history_max_age || 20 }
-    cattr_accessor(:root, instance_accessor: false) { "#{Rails.root}/private/trash" }
 
     field :version, type: String, default: SS.version
     field :ref_coll, type: String
@@ -22,13 +21,19 @@ module History::Model::Data
     validates :data, presence: true
   end
 
+  module ClassMethods
+    def root
+      "#{SS::Application.private_root}/trash"
+    end
+  end
+
   def coll
     collection.database[ref_coll]
   end
 
   def model
-    models = Mongoid.models.reject { |m| m.to_s.start_with?('Mongoid::') }
-    models.find{ |m| m.to_s == ref_class }
+    return if ref_class.blank? || ref_class.start_with?('Mongoid::')
+    @model ||= ref_class.constantize rescue nil
   end
 
   private

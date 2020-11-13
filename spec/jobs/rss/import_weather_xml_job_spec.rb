@@ -14,6 +14,10 @@ describe Rss::ImportWeatherXmlJob, dbscope: :example do
   end
 
   around do |example|
+    data_dir = SS.config.rss.weather_xml["data_cache_dir"]
+    data_dir = ::File.expand_path(data_dir, Rails.root) if data_dir.present?
+    ::FileUtils.rm_rf(data_dir) if data_dir.present?
+
     perform_enqueued_jobs do
       example.run
     end
@@ -48,8 +52,8 @@ describe Rss::ImportWeatherXmlJob, dbscope: :example do
       expect(item.authors.first.email).to be_nil
       expect(item.authors.first.uri).to be_nil
       expect(item.event_id).to eq '20160318182200_984'
-      expect(item.xml).not_to be_nil
-      expect(item.xml).to include('<InfoKind>気象警報・注意報</InfoKind>')
+      expect(item.weather_xml).not_to be_nil
+      expect(item.weather_xml).to include('<InfoKind>気象警報・注意報</InfoKind>')
       expect(item.state).to eq 'closed'
 
       expect(Job::Log.count).to eq 2
@@ -96,8 +100,8 @@ describe Rss::ImportWeatherXmlJob, dbscope: :example do
       expect(item.authors.first.email).to be_nil
       expect(item.authors.first.uri).to be_nil
       expect(item.event_id).to eq '20160318182200_984'
-      expect(item.xml).not_to be_nil
-      expect(item.xml).to include('<InfoKind>気象警報・注意報</InfoKind>')
+      expect(item.weather_xml).not_to be_nil
+      expect(item.weather_xml).to include('<InfoKind>気象警報・注意報</InfoKind>')
       expect(item.state).to eq 'closed'
 
       item = model.where(rss_link: 'http://xml.kishou.go.jp/data/9b43a982-fecf-3866-95e7-c375226a7c87.xml').first
@@ -111,8 +115,8 @@ describe Rss::ImportWeatherXmlJob, dbscope: :example do
       expect(item.authors.first.email).to be_nil
       expect(item.authors.first.uri).to be_nil
       expect(item.event_id).to eq '20160308133250'
-      expect(item.xml).not_to be_nil
-      expect(item.xml).to include('<InfoKind>震度速報</InfoKind>')
+      expect(item.weather_xml).not_to be_nil
+      expect(item.weather_xml).to include('<InfoKind>震度速報</InfoKind>')
       expect(item.state).to eq 'closed'
 
       expect(Job::Log.count).to eq 4
@@ -190,8 +194,8 @@ describe Rss::ImportWeatherXmlJob, dbscope: :example do
       expect(item.authors.first.email).to be_nil
       expect(item.authors.first.uri).to be_nil
       expect(item.event_id).to eq '20160308133250'
-      expect(item.xml).not_to be_nil
-      expect(item.xml).to include('<InfoKind>震度速報</InfoKind>')
+      expect(item.weather_xml).not_to be_nil
+      expect(item.weather_xml).to include('<InfoKind>震度速報</InfoKind>')
       expect(item.state).to eq 'closed'
 
       expect(Job::Log.count).to eq 3
@@ -267,8 +271,8 @@ describe Rss::ImportWeatherXmlJob, dbscope: :example do
       expect(item.authors.first.email).to be_nil
       expect(item.authors.first.uri).to be_nil
       expect(item.event_id).to eq nil
-      expect(item.xml).not_to be_nil
-      expect(item.xml).to include('<InfoKind>気象警報・注意報</InfoKind>')
+      expect(item.weather_xml).not_to be_nil
+      expect(item.weather_xml).to include('<InfoKind>気象警報・注意報</InfoKind>')
       expect(item.state).to eq 'closed'
 
       expect(Job::Log.count).to eq 2
@@ -372,8 +376,8 @@ describe Rss::ImportWeatherXmlJob, dbscope: :example do
         expect(item.authors.first.email).to be_nil
         expect(item.authors.first.uri).to be_nil
         expect(item.event_id).to eq '20110311144640'
-        expect(item.xml).not_to be_nil
-        expect(item.xml).to include('<InfoKind>震度速報</InfoKind>')
+        expect(item.weather_xml).not_to be_nil
+        expect(item.weather_xml).to include('<InfoKind>震度速報</InfoKind>')
         expect(item.state).to eq 'closed'
 
         expect(Job::Log.count).to eq 3
@@ -460,8 +464,8 @@ describe Rss::ImportWeatherXmlJob, dbscope: :example do
         expect(item.authors.first.email).to be_nil
         expect(item.authors.first.uri).to be_nil
         expect(item.event_id).to eq '20110311144640'
-        expect(item.xml).not_to be_nil
-        expect(item.xml).to include('<InfoKind>震度速報</InfoKind>')
+        expect(item.weather_xml).not_to be_nil
+        expect(item.weather_xml).to include('<InfoKind>震度速報</InfoKind>')
         expect(item.state).to eq 'closed'
 
         expect(Job::Log.count).to eq 2
@@ -514,41 +518,93 @@ describe Rss::ImportWeatherXmlJob, dbscope: :example do
     let(:xml1) { File.read(Rails.root.join(*%w(spec fixtures jmaxml afeedc52-107a-3d1d-9196-b108234d6e0f.xml))) }
     let(:xml2) { File.read(Rails.root.join(*%w(spec fixtures jmaxml 2b441518-4e79-342c-a271-7c25597f3a69.xml))) }
 
-    before do
-      stub_request(:get, 'http://weather.example.jp/developer/xml/feed/other.xml').
-        to_return(body: xml0, status: 200, headers: { 'Content-Type' => 'application/xml' })
-      stub_request(:get, 'http://xml.kishou.go.jp/data/afeedc52-107a-3d1d-9196-b108234d6e0f.xml').
-        to_return(body: xml1, status: 200, headers: { 'Content-Type' => 'application/xml' })
-      stub_request(:get, 'http://xml.kishou.go.jp/data/2b441518-4e79-342c-a271-7c25597f3a69.xml').
-        to_return(body: xml2, status: 200, headers: { 'Content-Type' => 'application/xml' })
+    context "plain xml" do
+      before do
+        stub_request(:get, 'http://weather.example.jp/developer/xml/feed/other.xml').
+          to_return(body: xml0, status: 200, headers: { 'Content-Type' => 'application/xml' })
+        stub_request(:get, 'http://xml.kishou.go.jp/data/afeedc52-107a-3d1d-9196-b108234d6e0f.xml').
+          to_return(body: xml1, status: 200, headers: { 'Content-Type' => 'application/xml' })
+        stub_request(:get, 'http://xml.kishou.go.jp/data/2b441518-4e79-342c-a271-7c25597f3a69.xml').
+          to_return(body: xml2, status: 200, headers: { 'Content-Type' => 'application/xml' })
+      end
+
+      it do
+        expect { described_class.pull_all }.to change { model.count }.from(0).to(4)
+
+        item1 = model.site(site1).node(node1).where(rss_link: 'http://xml.kishou.go.jp/data/afeedc52-107a-3d1d-9196-b108234d6e0f.xml').first
+        expect(item1).not_to be_nil
+        expect(item1.name).to eq '気象警報・注意報'
+        expect(item1.rss_link).to eq 'http://xml.kishou.go.jp/data/afeedc52-107a-3d1d-9196-b108234d6e0f.xml'
+        expect(item1.html).to eq '【福島県気象警報・注意報】注意報を解除します。'
+        expect(item1.released).to eq Time.zone.parse('2016-03-10T09:22:41Z')
+        expect(item1.authors.count).to eq 1
+        expect(item1.authors.first.name).to eq '福島地方気象台'
+        expect(item1.authors.first.email).to be_nil
+        expect(item1.authors.first.uri).to be_nil
+        expect(item1.event_id).to eq '20160318182200_984'
+        expect(item1.weather_xml).not_to be_nil
+        expect(item1.weather_xml).to include('<InfoKind>気象警報・注意報</InfoKind>')
+        expect(item1.state).to eq 'closed'
+
+        item2 = model.site(site2).node(node2).where(rss_link: 'http://xml.kishou.go.jp/data/afeedc52-107a-3d1d-9196-b108234d6e0f.xml').first
+        expect(item2.name).to eq item1.name
+        expect(item2.rss_link).to eq item1.rss_link
+
+        expect(Job::Log.count).to eq 4
+        Job::Log.all.each do |log|
+          expect(log.logs).to include(include("INFO -- : Started Job"))
+          expect(log.logs).to include(include("INFO -- : Completed Job"))
+        end
+      end
     end
 
-    it do
-      expect { described_class.pull_all }.to change { model.count }.from(0).to(4)
+    context "gzip-compressed xml" do
+      before do
+        stub_request(:get, 'http://weather.example.jp/developer/xml/feed/other.xml').
+          to_return(body: gzip(xml0), status: 200, headers: { 'Content-Encoding' => 'gzip', 'Content-Type' => 'application/xml' })
+        stub_request(:get, 'http://xml.kishou.go.jp/data/afeedc52-107a-3d1d-9196-b108234d6e0f.xml').
+          to_return(body: gzip(xml1), status: 200, headers: { 'Content-Encoding' => 'gzip', 'Content-Type' => 'application/xml' })
+        stub_request(:get, 'http://xml.kishou.go.jp/data/2b441518-4e79-342c-a271-7c25597f3a69.xml').
+          to_return(body: gzip(xml2), status: 200, headers: { 'Content-Encoding' => 'gzip', 'Content-Type' => 'application/xml' })
+      end
 
-      item1 = model.site(site1).node(node1).where(rss_link: 'http://xml.kishou.go.jp/data/afeedc52-107a-3d1d-9196-b108234d6e0f.xml').first
-      expect(item1).not_to be_nil
-      expect(item1.name).to eq '気象警報・注意報'
-      expect(item1.rss_link).to eq 'http://xml.kishou.go.jp/data/afeedc52-107a-3d1d-9196-b108234d6e0f.xml'
-      expect(item1.html).to eq '【福島県気象警報・注意報】注意報を解除します。'
-      expect(item1.released).to eq Time.zone.parse('2016-03-10T09:22:41Z')
-      expect(item1.authors.count).to eq 1
-      expect(item1.authors.first.name).to eq '福島地方気象台'
-      expect(item1.authors.first.email).to be_nil
-      expect(item1.authors.first.uri).to be_nil
-      expect(item1.event_id).to eq '20160318182200_984'
-      expect(item1.xml).not_to be_nil
-      expect(item1.xml).to include('<InfoKind>気象警報・注意報</InfoKind>')
-      expect(item1.state).to eq 'closed'
+      def gzip(text)
+        file = tmpfile(binary: true) do |f|
+          Zlib::GzipWriter.open(f) do |gz|
+            gz.write(text)
+          end
+        end
 
-      item2 = model.site(site2).node(node2).where(rss_link: 'http://xml.kishou.go.jp/data/afeedc52-107a-3d1d-9196-b108234d6e0f.xml').first
-      expect(item2.name).to eq item1.name
-      expect(item2.rss_link).to eq item1.rss_link
+        ::File.binread(file)
+      end
 
-      expect(Job::Log.count).to eq 4
-      Job::Log.all.each do |log|
-        expect(log.logs).to include(include("INFO -- : Started Job"))
-        expect(log.logs).to include(include("INFO -- : Completed Job"))
+      it do
+        expect { described_class.pull_all }.to change { model.count }.from(0).to(4)
+
+        item1 = model.site(site1).node(node1).where(rss_link: 'http://xml.kishou.go.jp/data/afeedc52-107a-3d1d-9196-b108234d6e0f.xml').first
+        expect(item1).not_to be_nil
+        expect(item1.name).to eq '気象警報・注意報'
+        expect(item1.rss_link).to eq 'http://xml.kishou.go.jp/data/afeedc52-107a-3d1d-9196-b108234d6e0f.xml'
+        expect(item1.html).to eq '【福島県気象警報・注意報】注意報を解除します。'
+        expect(item1.released).to eq Time.zone.parse('2016-03-10T09:22:41Z')
+        expect(item1.authors.count).to eq 1
+        expect(item1.authors.first.name).to eq '福島地方気象台'
+        expect(item1.authors.first.email).to be_nil
+        expect(item1.authors.first.uri).to be_nil
+        expect(item1.event_id).to eq '20160318182200_984'
+        expect(item1.weather_xml).not_to be_nil
+        expect(item1.weather_xml).to include('<InfoKind>気象警報・注意報</InfoKind>')
+        expect(item1.state).to eq 'closed'
+
+        item2 = model.site(site2).node(node2).where(rss_link: 'http://xml.kishou.go.jp/data/afeedc52-107a-3d1d-9196-b108234d6e0f.xml').first
+        expect(item2.name).to eq item1.name
+        expect(item2.rss_link).to eq item1.rss_link
+
+        expect(Job::Log.count).to eq 4
+        Job::Log.all.each do |log|
+          expect(log.logs).to include(include("INFO -- : Started Job"))
+          expect(log.logs).to include(include("INFO -- : Completed Job"))
+        end
       end
     end
   end
@@ -556,6 +612,7 @@ describe Rss::ImportWeatherXmlJob, dbscope: :example do
   describe "#remove_old_cache" do
     let(:base_name1) { "#{unique_id}.xml" }
     let(:base_name2) { "#{unique_id}.xml" }
+    let(:base_name3) { "#{unique_id}.xml.gz" }
     let(:threshold) { Time.zone.now.beginning_of_minute - 1.day }
 
     before do
@@ -564,9 +621,11 @@ describe Rss::ImportWeatherXmlJob, dbscope: :example do
 
       ::File.write(::File.join(tmpdir, base_name1), unique_id)
       ::File.write(::File.join(tmpdir, base_name2), unique_id)
+      Zlib::GzipWriter.open(::File.join(tmpdir, base_name3)) { |gz| gz.write unique_id }
 
       mtime = threshold - 1.second
       ::File.utime(mtime.to_i, mtime.to_i, ::File.join(tmpdir, base_name1))
+      ::File.utime(mtime.to_i, mtime.to_i, ::File.join(tmpdir, base_name3))
     end
 
     after do
@@ -576,12 +635,14 @@ describe Rss::ImportWeatherXmlJob, dbscope: :example do
     it do
       expect(::File.exists?(::File.join(tmpdir, base_name1))).to be_truthy
       expect(::File.exists?(::File.join(tmpdir, base_name2))).to be_truthy
+      expect(::File.exists?(::File.join(tmpdir, base_name3))).to be_truthy
 
       # call private method
       described_class.new.send(:remove_old_cache, threshold)
 
       expect(::File.exists?(::File.join(tmpdir, base_name1))).to be_falsey
       expect(::File.exists?(::File.join(tmpdir, base_name2))).to be_truthy
+      expect(::File.exists?(::File.join(tmpdir, base_name3))).to be_falsey
     end
   end
 end

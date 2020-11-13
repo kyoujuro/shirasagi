@@ -35,6 +35,7 @@ module Member::LoginFilter
 
   def set_member(member, timestamp = Time.zone.now.to_i)
     if @cur_site
+      reset_session
       session[session_member_key] = {
         "member_id" => member.id,
         "remote_addr" => remote_addr,
@@ -65,11 +66,6 @@ module Member::LoginFilter
   def member_login_path
     return false unless member_login_node
     "#{member_login_node.url}login.html"
-  end
-
-  def redirect_url
-    return "/" unless member_login_node
-    member_login_node.redirect_url || "/"
   end
 
   def translate_redirect_option(opts)
